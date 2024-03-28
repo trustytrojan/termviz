@@ -77,7 +77,7 @@ void _main(const Args &args)
 		for (auto &a : amplitudes)
 			a = 0;
 
-		// group up freqdata into bigger ranges by summing up amplitudes for the same calculated index
+		// map frequency bins of freqdata to amplitudes
 		for (auto i = 0; i < freqdata_len; ++i)
 		{
 			const auto [re, im] = freqdata[i];
@@ -89,7 +89,7 @@ void _main(const Args &args)
 				index = (float)i / freqdata_len * tsize.width;
 				break;
 			case Args::Scale::LOG:
-				index = log(i + 1) / logmax * tsize.width;
+				index = log(i ? i : 1) / logmax * tsize.width;
 				break;
 			case Args::Scale::SQRT:
 				index = sqrt(i) / sqrtmax * tsize.width;
