@@ -2,6 +2,7 @@
 an audio frequency spectrum visualizer for the terminal
 
 ## features
+- dynamic scaling: spectrum height and width scales with terminal height and width
 - customizable sample size (`-n`) to vary responsiveness and precision
 - if your terminal supports truecolor, termviz can render a full 8-bit rgb spectrum
 	- the color spectrum is customizable using the `--hsv` argument
