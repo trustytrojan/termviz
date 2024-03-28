@@ -1,5 +1,5 @@
 # termviz
-terminal audio frequency spectrum visualizer
+an audio frequency spectrum visualizer for the terminal
 
 ## features
 - customizable sample size (`-n`) to vary responsiveness and precision
