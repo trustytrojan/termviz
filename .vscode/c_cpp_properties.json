@@ -1,0 +1,14 @@
+{
+	"configurations": [
+		{
+			"name": "Linux",
+			"includePath": [
+				"/usr/local/include/kissfft"
+			],
+			"compilerPath": "/bin/g++",
+			"cppStandard": "gnu++23",
+			"intelliSenseMode": "linux-gcc-x64"
+		}
+	],
+	"version": 4
+}
