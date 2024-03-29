@@ -1,16 +1,17 @@
 #pragma once
 
 #include <argparse/argparse.hpp>
+#include "FrequencySpectrum.hpp"
 
 using argparse::ArgumentParser;
 
 struct Args : private ArgumentParser
 {
-	enum class Scale
+	enum class ColorType
 	{
-		LINEAR,
-		LOG,
-		SQRT
+		WHEEL,
+		SOLID,
+		NONE
 	};
 
 	std::string audio_file;
@@ -19,17 +20,16 @@ struct Args : private ArgumentParser
 	struct
 	{
 		float multiplier;
-		char character, peak_char;
+		std::string characters;
+		char peak_char;
 	} spectrum;
 
 	// spectrum scale
-	Scale scale;
+	FrequencySpectrum::Scale scale;
 
-	// whether color is enabled
-	bool color;
-
-	// hue offset, saturation, value
+	ColorType color;
 	std::tuple<float, float, float> hsv{0, 1, 1};
+	std::tuple<int, int, int> rgb;
 
 	Args(const int argc, const char *const *const argv)
 		: ArgumentParser(argv[0])
@@ -41,11 +41,12 @@ struct Args : private ArgumentParser
 			.default_value(2048)
 			.scan<'i', int>()
 			.validate();
-		add_argument("-c", "--spectrum-char")
-			.help("character to render the spectrum with")
+		add_argument("-c", "--spectrum-chars")
+			.help("characters to render columns with\nif more than 1 character is given, --peak-char is recommended")
 			.default_value("#");
 		add_argument("--peak-char")
-			.help("character to print at the highest point of frequency bins");
+			.help("character to print at the highest point for each column")
+			.default_value("");
 		add_argument("-s", "--scale")
 			.help("spectrum frequency scale")
 			.choices("linear", "log", "sqrt")
@@ -56,17 +57,20 @@ struct Args : private ArgumentParser
 			.default_value(3.f)
 			.scan<'f', float>()
 			.validate();
-		add_argument("--no-color")
-			.help("disable colorful spectrum")
-			.flag();
+		add_argument("--color")
+			.help("enable a colorful spectrum!")
+			.choices("wheel", "solid", "none")
+			.default_value("wheel")
+			.validate();
 		add_argument("--hsv")
-			.help("choose a hue offset, saturation, and brightness for --color\nvalues must be between [0, 1]\nwill be ignored if --color is absent")
+			.help("requires '--color wheel'\nchoose a hue offset for the color wheel, saturation, and brightness\nvalues must be between [0, 1]")
 			.nargs(3)
 			.validate();
-		add_argument("--solid")
-			.help("renders the spectrum with a solid color\nmust provide [r g b] values\nwill be ignored if --color is absent")
+		add_argument("--rgb")
+			.help("required by '--color solid'\nrenders the spectrum with a solid color\nmust provide space-separated rgb integers")
 			.nargs(3)
 			.validate();
+
 		try
 		{
 			parse_args(argc, argv);
@@ -74,7 +78,8 @@ struct Args : private ArgumentParser
 		catch (const std::exception &e)
 		{
 			// print error and help to stderr
-			std::cerr << argv[0] << ": " << e.what() << '\n' << *this;
+			std::cerr << argv[0] << ": " << e.what() << '\n'
+					  << *this;
 
 			// just exit here since we don't want to print anything after the help
 			exit(EXIT_FAILURE);
@@ -85,7 +90,7 @@ struct Args : private ArgumentParser
 		if ((fft_size = get<int>("-n")) & 1)
 			throw std::invalid_argument("sample size must be even!");
 
-		spectrum.character = get("-c").front();
+		spectrum.characters = get("-c");
 		spectrum.multiplier = get<float>("-m");
 
 		try
@@ -94,36 +99,37 @@ struct Args : private ArgumentParser
 		}
 		catch (const std::logic_error &e)
 		{
-			spectrum.peak_char = spectrum.character;
+			spectrum.peak_char = 0;
 		}
 
-		if ((color = !get<bool>("--no-color")))
+		const auto &color_str = get("--color");
+		if (color_str == "wheel")
 		{
-			try
-			{
-				const auto &hsv_strs = get<std::vector<std::string>>("--hsv");
-				if (!hsv_strs.size())
-					throw std::logic_error("????");
+			color = ColorType::WHEEL;
+			const auto hsv_strs = get<std::vector<std::string>>("--hsv");
+			if (hsv_strs.size())
 				hsv = {std::stof(hsv_strs[0]), std::stof(hsv_strs[1]), std::stof(hsv_strs[2])};
-			}
-			catch (const std::invalid_argument &e)
-			{
-				std::cerr << "all arguments to --hsv must represent floating point numbers\n";
-				throw;
-			}
-			catch (const std::logic_error &e)
-			{
-				// --hsv wasn't passed, which is fine, we have defaults
-			}
 		}
+		else if (color_str == "solid")
+		{
+			color = ColorType::SOLID;
+			const auto rgb_strs = get<std::vector<std::string>>("--rgb");
+			if (!rgb_strs.size())
+				throw std::invalid_argument("'--rgb' must be passed with '--color solid'");
+			rgb = {std::stoi(rgb_strs[0]), std::stoi(rgb_strs[1]), std::stoi(rgb_strs[2])};
+		}
+		else if (color_str == "none")
+			color = ColorType::NONE;
+		else
+			throw std::logic_error("?????????");
 
 		const auto &scale = get("-s");
 		if (scale == "linear")
-			this->scale = Scale::LINEAR;
+			this->scale = FrequencySpectrum::Scale::LINEAR;
 		else if (scale == "log")
-			this->scale = Scale::LOG;
+			this->scale = FrequencySpectrum::Scale::LOG;
 		else if (scale == "sqrt")
-			this->scale = Scale::SQRT;
+			this->scale = FrequencySpectrum::Scale::SQRT;
 		else
 			throw std::logic_error("impossible!!!!");
 	}
