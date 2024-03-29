@@ -17,15 +17,14 @@ struct Args : private ArgumentParser
 	std::string audio_file;
 	int fft_size;
 
-	struct
-	{
-		float multiplier;
-		std::string characters;
-		char peak_char;
-	} spectrum;
+	float multiplier;
+	std::string characters;
+	char peak_char;
+	int nth_root = 0;
 
 	// spectrum scale
 	FrequencySpectrum::Scale scale;
+	FrequencySpectrum::InterpolationType interp;
 
 	ColorType color;
 	std::tuple<float, float, float> hsv{0, 1, 1};
@@ -49,8 +48,18 @@ struct Args : private ArgumentParser
 			.default_value("");
 		add_argument("-s", "--scale")
 			.help("spectrum frequency scale")
-			.choices("linear", "log", "sqrt")
+			.choices("linear", "log", "nth-root")
 			.default_value("log")
+			.validate();
+		add_argument("--nth-root")
+			.help("set the root to use with '--scale nth-root'")
+			.default_value(2.f)
+			.scan<'f', float>()
+			.validate();
+		add_argument("-i", "--interpolation")
+			.help("spectrum interpolation type")
+			.choices("none", "linear", "cspline", "cspline_hermite")
+			.default_value("cspline")
 			.validate();
 		add_argument("-m", "--multiplier")
 			.help("multiply spectrum amplitude by this amount")
@@ -74,6 +83,7 @@ struct Args : private ArgumentParser
 		try
 		{
 			parse_args(argc, argv);
+			copy_arg_values();
 		}
 		catch (const std::exception &e)
 		{
@@ -82,55 +92,91 @@ struct Args : private ArgumentParser
 					  << *this;
 
 			// just exit here since we don't want to print anything after the help
-			exit(EXIT_FAILURE);
+			// call _Exit instead of exit to not trigger the exit handler in main.cpp
+			_Exit(EXIT_FAILURE);
 		}
+	}
 
+private:
+	void copy_arg_values()
+	{
 		audio_file = get("audio_file");
 
 		if ((fft_size = get<int>("-n")) & 1)
 			throw std::invalid_argument("sample size must be even!");
 
-		spectrum.characters = get("-c");
-		spectrum.multiplier = get<float>("-m");
+		characters = get("-c");
+		multiplier = get<float>("-m");
 
+		// nth root
 		try
 		{
-			spectrum.peak_char = get("--peak-char").front();
+			nth_root = get<float>("--nth-root");
 		}
 		catch (const std::logic_error &e)
 		{
-			spectrum.peak_char = 0;
 		}
 
-		const auto &color_str = get("--color");
-		if (color_str == "wheel")
-		{
-			color = ColorType::WHEEL;
-			const auto hsv_strs = get<std::vector<std::string>>("--hsv");
-			if (hsv_strs.size())
-				hsv = {std::stof(hsv_strs[0]), std::stof(hsv_strs[1]), std::stof(hsv_strs[2])};
-		}
-		else if (color_str == "solid")
-		{
-			color = ColorType::SOLID;
-			const auto rgb_strs = get<std::vector<std::string>>("--rgb");
-			if (!rgb_strs.size())
-				throw std::invalid_argument("'--rgb' must be passed with '--color solid'");
-			rgb = {std::stoi(rgb_strs[0]), std::stoi(rgb_strs[1]), std::stoi(rgb_strs[2])};
-		}
-		else if (color_str == "none")
-			color = ColorType::NONE;
-		else
-			throw std::logic_error("?????????");
+		if (!nth_root)
+			throw std::invalid_argument("nth_root cannot be zero!");
 
-		const auto &scale = get("-s");
-		if (scale == "linear")
-			this->scale = FrequencySpectrum::Scale::LINEAR;
-		else if (scale == "log")
-			this->scale = FrequencySpectrum::Scale::LOG;
-		else if (scale == "sqrt")
-			this->scale = FrequencySpectrum::Scale::SQRT;
-		else
-			throw std::logic_error("impossible!!!!");
+		// peak character
+		try
+		{
+			peak_char = get("--peak-char").front();
+		}
+		catch (const std::logic_error &e)
+		{
+			peak_char = 0;
+		}
+
+		{ // interpolation type
+			const auto &interp_str = get("-i");
+			if (interp_str == "none")
+				interp = FrequencySpectrum::InterpolationType::NONE;
+			else if (interp_str == "linear")
+				interp = FrequencySpectrum::InterpolationType::LINEAR;
+			else if (interp_str == "cspline")
+				interp = FrequencySpectrum::InterpolationType::CSPLINE;
+			else if (interp_str == "cspline_hermite")
+				interp = FrequencySpectrum::InterpolationType::CSPLINE_HERMITE;
+			else
+				throw std::logic_error("????");
+		}
+
+		{ // spectrum coloring type
+			const auto &color_str = get("--color");
+			if (color_str == "wheel")
+			{
+				color = ColorType::WHEEL;
+				const auto &hsv_strs = get<std::vector<std::string>>("--hsv");
+				if (hsv_strs.size())
+					hsv = {std::stof(hsv_strs[0]), std::stof(hsv_strs[1]), std::stof(hsv_strs[2])};
+			}
+			else if (color_str == "solid")
+			{
+				color = ColorType::SOLID;
+				const auto &rgb_strs = get<std::vector<std::string>>("--rgb");
+				if (!rgb_strs.size())
+					throw std::invalid_argument("'--rgb' must be passed with '--color solid'");
+				rgb = {std::stoi(rgb_strs[0]), std::stoi(rgb_strs[1]), std::stoi(rgb_strs[2])};
+			}
+			else if (color_str == "none")
+				color = ColorType::NONE;
+			else
+				throw std::logic_error("?????????");
+		}
+
+		{ // frequency scale (x-axis)
+			const auto &scale = get("-s");
+			if (scale == "linear")
+				this->scale = FrequencySpectrum::Scale::LINEAR;
+			else if (scale == "log")
+				this->scale = FrequencySpectrum::Scale::LOG;
+			else if (scale == "nth-root")
+				this->scale = FrequencySpectrum::Scale::NTH_ROOT;
+			else
+				throw std::logic_error("impossible!!!!");
+		}
 	}
 };

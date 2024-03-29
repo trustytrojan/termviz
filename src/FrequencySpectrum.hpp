@@ -12,43 +12,73 @@ public:
 	{
 		LINEAR,
 		LOG,
-		SQRT
+		NTH_ROOT
+	};
+
+	enum class InterpolationType
+	{
+		NONE,
+		LINEAR = tk::spline::linear,
+		CSPLINE = tk::spline::cspline,
+		CSPLINE_HERMITE = tk::spline::cspline_hermite
 	};
 
 private:
 	KissFftr kf;
 	std::vector<kiss_fft_cpx> freqdata;
-	double logmax, sqrtmax;
+	int nth_root = 2;
 	tk::spline spline;
-	tk::spline::spline_type spline_type;
+	InterpolationType interp;
 	Scale scale;
 
+	struct
+	{
+		double log, sqrt, cbrt, nthroot;
+		void set(const FrequencySpectrum &fs)
+		{
+			const auto max = fs.freqdata.size();
+			log = ::log(max);
+			sqrt = ::sqrt(max);
+			cbrt = ::cbrt(max);
+			nthroot = ::pow(max, 1. / fs.nth_root);
+		}
+	} scale_max;
+
 public:
+	/**
+	 * Initialize frequency spectrum renderer.
+	 * @param fft_size sample chunk size fed into the `transform` method
+	 */
 	FrequencySpectrum(const int fft_size,
 					  const Scale scale = Scale::LOG,
-					  const tk::spline::spline_type spline_type = tk::spline::cspline)
+					  const InterpolationType interp = InterpolationType::CSPLINE)
 		: kf(fft_size),
 		  freqdata(fft_size / 2 + 1),
-		  logmax(log(freqdata.size())),
-		  sqrtmax(sqrt(freqdata.size())),
-		  spline_type(spline_type),
-		  scale(scale) {}
-
-	void set_fft_size(const int fft_size)
+		  interp(interp),
+		  scale(scale)
 	{
-		kf.set_cfg(fft_size);
-		freqdata.resize(fft_size / 2 + 1);
-		logmax = log(freqdata.size());
-		sqrtmax = sqrt(freqdata.size());
+		scale_max.set(*this);
 	}
 
 	/**
-	 * Set the type of spline to interpolate missing points with.
-	 * @param spline_type new spline type to use
+	 * Set the FFT size used in the `kissfft` library.
+	 * @param fft_size new fft size to use
+	 * @throws `std::invalid_argument` if `fft_size` is not even
 	 */
-	void set_spline_type(const tk::spline::spline_type spline_type)
+	void set_fft_size(const int fft_size)
 	{
-		this->spline_type = spline_type;
+		kf.set_fft_size(fft_size);
+		freqdata.resize(fft_size / 2 + 1);
+		scale_max.set(*this);
+	}
+
+	/**
+	 * Set interpolation type.
+	 * @param interp new interpolation type to use
+	 */
+	void set_interp_type(const InterpolationType interp_type)
+	{
+		this->interp = interp_type;
 	}
 
 	/**
@@ -61,21 +91,35 @@ public:
 	}
 
 	/**
-	 * Render the spectrum for `this->fft_size` samples of input.
-	 * @param timedata Pointer to wave data. Must be of size `this->fft_size`, otherwise dire things may happen.
+	 * Set the nth-root to use when using the `NTH_ROOT` scale.
+	 * @param nth_root new nth_root to use
+	 * @throws `std::invalid_argument` if `nth_root` is zero
+	 */
+	void set_nth_root(const int nth_root)
+	{
+		if (!nth_root)
+			throw std::invalid_argument("preventing division by zero");
+		this->nth_root = nth_root;
+	}
+
+	/**
+	 * Render the spectrum for `fft_size` samples of input. This was the amount set in the constructor or in `set_fft_size`.
+	 * @param timedata Pointer to wave data. Must be of size `fft_size`, otherwise dire things may happen.
 	 * @param spectrum Output vector to store the rendered spectrum.
 	 *                 The size of this vector is used for bin-mapping of frequencies,
 	 *                 so make sure you set it correctly.
+	 * @throws `std::invalid_argument` if `timedata` is null
 	 */
 	void render(const float *const timedata, std::vector<float> &spectrum)
 	{
 		// perform fft: frequency range to amplitude values are stored in freqdata
+		// throws if either argument is null
 		kf.transform(timedata, freqdata.data());
 
 		// zero out array since we are creating sums
 		std::ranges::fill(spectrum, 0);
 
-		// map frequency bins of freqdata to amplitudes
+		// map frequency bins of freqdata to spectrum
 		for (auto i = 0; i < (int)freqdata.size(); ++i)
 		{
 			const auto [re, im] = freqdata[i];
@@ -83,16 +127,12 @@ public:
 			spectrum[calc_index(i, (int)spectrum.size() - 1)] += amplitude;
 		}
 
-		// apply spline if scale is not linear (no gaps are present when linear)
-		if (scale != Scale::LINEAR)
-			smooth_spectrum(spectrum);
+		// apply interpolation if necessary
+		if (interp != InterpolationType::NONE && scale != Scale::LINEAR)
+			interpolate(spectrum);
 	}
 
 private:
-	/**
-	 * Calculate the index to add amplitudes to in the spectrum vector (in `render`).
-	 * The returned index will be in the range `[0, max_index]`.
-	 */
 	int calc_index(const int i, const int max_index)
 	{
 		return std::max(0, std::min((int)(calc_index_ratio(i) * max_index), max_index));
@@ -105,15 +145,25 @@ private:
 		case Scale::LINEAR:
 			return i / freqdata.size();
 		case Scale::LOG:
-			return log(i ? i : 1) / logmax;
-		case Scale::SQRT:
-			return sqrt(i) / sqrtmax;
+			return log(i ? i : 1) / scale_max.log;
+		case Scale::NTH_ROOT:
+			switch (nth_root)
+			{
+			case 1:
+				return i / freqdata.size();
+			case 2:
+				return sqrt(i) / scale_max.sqrt;
+			case 3:
+				return cbrt(i) / scale_max.cbrt;
+			default:
+				return pow(i, 1 / nth_root) / scale_max.nthroot;
+			}
 		default:
 			throw std::logic_error("impossible!!!!!!!");
 		}
 	}
 
-	void smooth_spectrum(std::vector<float> &spectrum)
+	void interpolate(std::vector<float> &spectrum)
 	{
 		// separate the nonzero values (y's) and their indices (x's)
 		std::vector<double> nonzero_values, indices;
@@ -130,7 +180,7 @@ private:
 		if (indices.size() < 3)
 			return;
 
-		spline.set_points(indices, nonzero_values, spline_type);
+		spline.set_points(indices, nonzero_values, (tk::spline::spline_type)interp);
 
 		// only copy spline values to fill in the gaps
 		for (int i = 0; i < (int)spectrum.size(); ++i)

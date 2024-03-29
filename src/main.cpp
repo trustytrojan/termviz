@@ -10,13 +10,16 @@ void _main(const Args &args)
 {
 	// initialize resources
 	SndfileHandle sf(args.audio_file);
-	FrequencySpectrum fs(args.fft_size, args.scale);
+	FrequencySpectrum fs(args.fft_size, args.scale, args.interp);
 	PortAudio pa;
 	auto pa_stream = pa.stream(0, sf.channels(), paFloat32, sf.samplerate(), args.fft_size, NULL, NULL);
 
+	if (args.nth_root)
+		fs.set_nth_root(args.nth_root);
+
 	// used to normalize the bar height: more samples mean higher amplitudes in the spectrum array.
 	// numerator used to be `1.`, then saw that this is an easy way to add a multiplier argument.
-	const auto fftsize_inv = args.spectrum.multiplier / args.fft_size;
+	const auto fftsize_inv = args.multiplier / args.fft_size;
 
 	// arrays to store fft input and audio data
 	float timedata[args.fft_size];
@@ -66,7 +69,7 @@ void _main(const Args &args)
 		fs.render(timedata, spectrum);
 
 		// clear the terminal
-		// std::cout << "\ec";
+		std::cout << "\ec";
 
 		// print the spectrum
 		for (int i = 0; i < tsize.width; ++i)
@@ -110,10 +113,10 @@ void _main(const Args &args)
 				// print character, move cursor up 1, move cursor left 1
 				char character;
 
-				if (args.spectrum.peak_char && j == bar_height - 1)
-					character = args.spectrum.peak_char;
+				if (args.peak_char && j == bar_height - 1)
+					character = args.peak_char;
 				else
-					character = args.spectrum.characters[j % args.spectrum.characters.length()];
+					character = args.characters[j % args.characters.length()];
 
 				std::cout << character << "\e[1A\e[1D";
 			}
@@ -121,18 +124,14 @@ void _main(const Args &args)
 	}
 }
 
-#include <signal.h>
-
-void sigint_handler(int)
+void exit_handler()
 {
 	std::cout << "\ec";
-	exit(0);
 }
 
 int main(const int argc, const char *const *const argv)
 {
-	if (signal(SIGINT, sigint_handler) == SIG_ERR)
-		perror("signal");
+	atexit(exit_handler);
 	try
 	{
 		_main(Args(argc, argv));
