@@ -158,7 +158,7 @@ private:
 				color = ColorType::SOLID;
 				const auto &rgb_strs = get<std::vector<std::string>>("--rgb");
 				if (!rgb_strs.size())
-					throw std::invalid_argument("'--rgb' must be passed with '--color solid'");
+					throw std::invalid_argument("option '--rgb' required by '--color solid'");
 				rgb = {std::stoi(rgb_strs[0]), std::stoi(rgb_strs[1]), std::stoi(rgb_strs[2])};
 			}
 			else if (color_str == "none")
