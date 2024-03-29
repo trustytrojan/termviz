@@ -9,7 +9,7 @@ an audio frequency spectrum visualizer for the terminal
 - customizable frequency scale: can choose from `linear`, `log`, or `sqrt` (more to come)
 
 ## building
-1. install project [dependencies](#dependencies) on your system
+1. install project dependencies on your system
 2. run `make` in the root directory
 
 ## dependencies
