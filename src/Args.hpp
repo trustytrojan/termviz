@@ -56,14 +56,17 @@ struct Args : private ArgumentParser
 			.default_value(3.f)
 			.scan<'f', float>()
 			.validate();
-		add_argument("--color")
-			.help("display a colorful spectrum!")
+		add_argument("--no-color")
+			.help("disable colorful spectrum")
 			.flag();
 		add_argument("--hsv")
 			.help("choose a hue offset, saturation, and brightness for --color\nvalues must be between [0, 1]\nwill be ignored if --color is absent")
 			.nargs(3)
 			.validate();
-
+		add_argument("--solid")
+			.help("renders the spectrum with a solid color\nmust provide [r g b] values\nwill be ignored if --color is absent")
+			.nargs(3)
+			.validate();
 		try
 		{
 			parse_args(argc, argv);
@@ -94,7 +97,7 @@ struct Args : private ArgumentParser
 			spectrum.peak_char = spectrum.character;
 		}
 
-		if ((color = get<bool>("--color")))
+		if ((color = !get<bool>("--no-color")))
 		{
 			try
 			{

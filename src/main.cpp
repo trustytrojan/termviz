@@ -1,11 +1,14 @@
-#include <kiss_fftr.h>
+// #include <kiss_fftr.h>
 #include <sndfile.hh>
 
 #include "Args.hpp"
 #include "ColorUtils.hpp"
+// #include "KissFftr.hpp"
 #include "PortAudio.hpp"
-#include "SmoothedAmplitudes.hpp"
+// #include "SmoothedAmplitudes.hpp"
 #include "TerminalSize.hpp"
+
+#include "FrequencySpetcrum.hpp"
 
 void _main(const Args &args)
 {
@@ -13,26 +16,24 @@ void _main(const Args &args)
 	SndfileHandle sf(args.audio_file);
 
 	// kissfft initialization
-	const auto cfg = kiss_fftr_alloc(args.fft_size, 0, NULL, NULL);
+	// KissFftr kf(args.fft_size);
+
+	FrequencySpectrum fs(args.fft_size, (FrequencySpectrum::Scale)args.scale);
 
 	// initialize PortAudio, create stream
 	PortAudio pa;
 	auto pa_stream = pa.stream(0, sf.channels(), paFloat32, sf.samplerate(), args.fft_size, NULL, NULL);
 
 	// define some constants
-	const int freqdata_len = (args.fft_size / 2) + 1;
 	const auto fftsize_inv = args.spectrum.multiplier / args.fft_size;
-	const auto logmax = log(freqdata_len);
-	const auto sqrtmax = sqrt(freqdata_len);
 
-	// arrays to store fft and audio data
+	// arrays to store fft input and audio data
 	float timedata[args.fft_size];
-	kiss_fft_cpx freqdata[freqdata_len];
 	float buffer[args.fft_size * sf.channels()];
 
 	// get terminal size, initialize amplitudes array
 	TerminalSize tsize;
-	std::vector<float> amplitudes(tsize.width);
+	std::vector<float> spectrum(tsize.width);
 
 	// start reading, playing, and processing audio
 	while (1)
@@ -42,7 +43,7 @@ void _main(const Args &args)
 
 			if (tsize.width != new_tsize.width)
 			{
-				amplitudes.resize(new_tsize.width);
+				spectrum.resize(new_tsize.width);
 				tsize.width = new_tsize.width;
 			}
 
@@ -70,35 +71,7 @@ void _main(const Args &args)
 		for (int i = 0; i < args.fft_size; ++i)
 			timedata[i] = buffer[i * sf.channels()];
 
-		// perform fft: frequency range to amplitude values are stored in freqdata
-		kiss_fftr(cfg, timedata, freqdata);
-
-		// zero out array since we are creating sums
-		for (auto &a : amplitudes)
-			a = 0;
-
-		// map frequency bins of freqdata to amplitudes
-		for (auto i = 0; i < freqdata_len; ++i)
-		{
-			const auto [re, im] = freqdata[i];
-			const float amplitude = sqrt((re * re) + (im * im));
-			int index;
-			switch (args.scale)
-			{
-			case Args::Scale::LINEAR:
-				index = (float)i / freqdata_len * tsize.width;
-				break;
-			case Args::Scale::LOG:
-				index = log(i ? i : 1) / logmax * tsize.width;
-				break;
-			case Args::Scale::SQRT:
-				index = sqrt(i) / sqrtmax * tsize.width;
-				break;
-			default:
-				throw std::logic_error("impossible!!!!!!!");
-			}
-			amplitudes[std::min(index, tsize.width - 1)] += amplitude;
-		}
+		fs.render(timedata, spectrum);
 
 		// clear the terminal
 		std::cout << "\ec";
@@ -108,14 +81,14 @@ void _main(const Args &args)
 		// 	std::cout << "\e[39m";
 
 		// apply spline only if scale isn't linear
-		if (args.scale != Args::Scale::LINEAR)
-			amplitudes = SmoothedAmplitudes(amplitudes);
+		// if (args.scale != Args::Scale::LINEAR)
+		// 	amplitudes = SmoothedAmplitudes(amplitudes);
 
 		// print the spectrum
 		for (int i = 0; i < tsize.width; ++i)
 		{
 			// calculate height based on amplitude
-			int bar_height = fftsize_inv * amplitudes[i] * tsize.height;
+			int bar_height = fftsize_inv * spectrum[i] * tsize.height;
 
 			if (args.color)
 			{
@@ -134,9 +107,6 @@ void _main(const Args &args)
 				std::cout << ((j == bar_height - 1) ? args.spectrum.peak_char : args.spectrum.character) << "\e[1A\e[1D";
 		}
 	}
-
-	// resource cleanup
-	kiss_fftr_free(cfg);
 }
 
 #include <signal.h>
