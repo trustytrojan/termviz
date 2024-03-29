@@ -25,8 +25,8 @@ private:
 
 public:
 	FrequencySpectrum(const int fft_size,
-			 const Scale scale = Scale::LOG,
-			 const tk::spline::spline_type spline_type = tk::spline::cspline)
+					  const Scale scale = Scale::LOG,
+					  const tk::spline::spline_type spline_type = tk::spline::cspline)
 		: kf(fft_size),
 		  freqdata(fft_size / 2 + 1),
 		  logmax(log(freqdata.size())),
@@ -64,6 +64,8 @@ public:
 	 * Render the spectrum for `this->fft_size` samples of input.
 	 * @param timedata Pointer to wave data. Must be of size `this->fft_size`, otherwise dire things may happen.
 	 * @param spectrum Output vector to store the rendered spectrum.
+	 *                 The size of this vector is used for bin-mapping of frequencies,
+	 *                 so make sure you set it correctly.
 	 */
 	void render(const float *const timedata, std::vector<float> &spectrum)
 	{
