@@ -1,10 +1,13 @@
 #include <sndfile.hh>
-
 #include "Args.hpp"
 #include "FrequencySpectrum.hpp"
 #include "ColorUtils.hpp"
 #include "PortAudio.hpp"
 #include "TerminalSize.hpp"
+
+#include "termviz.hpp"
+
+using ColorType = termviz::ColorType;
 
 void _main(const Args &args)
 {
@@ -28,6 +31,8 @@ void _main(const Args &args)
 	// get terminal size, initialize spectrum array
 	TerminalSize tsize;
 	std::vector<float> spectrum(tsize.width);
+
+	float t = 0;
 
 	// start reading, playing, and processing audio
 	while (1)
@@ -53,6 +58,12 @@ void _main(const Args &args)
 			if (!frames_read)
 				break;
 
+			// if (frames_read < args.fft_size)
+			// {
+			// 	std::cerr << "\ecframes_read < args.fft_size\n";
+			// 	return;
+			// }
+
 			// play the audio as it is read
 			pa_stream.write(buffer, frames_read);
 
@@ -65,38 +76,39 @@ void _main(const Args &args)
 		for (int i = 0; i < args.fft_size; ++i)
 			timedata[i] = buffer[i * sf.channels()];
 
-		// render the spectrum into the array
+		// render the spectrum
 		fs.render(timedata, spectrum);
 
 		// clear the terminal
 		std::cout << "\ec";
 
-		// print the spectrum
+		// print the rendered spectrum
 		for (int i = 0; i < tsize.width; ++i)
 		{
 			// calculate height based on amplitude
-			// `spectrum[i]` is usually between [0, 1] scaled by `args.fft_size`,
+			// `spectrum[i]` is usually between [0, 1] scaled by `args.fft_size` (due to mapping smaller bins to larger bins),
 			// so we need to multiply by its inverse to normalize it.
 			int bar_height = fftsize_inv * spectrum[i] * tsize.height;
 
+			// apply coloring if necessary
 			switch (args.color)
 			{
-			case Args::ColorType::WHEEL:
+			case ColorType::WHEEL:
 			{
 				const auto [h, s, v] = args.hsv;
-				const auto [r, g, b] = ColorUtils::hsvToRgb(((float)i / tsize.width) + h, s, v);
+				const auto [r, g, b] = ColorUtils::hsvToRgb(((float)i / tsize.width) + h + t, s, v);
 				std::cout << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
 				break;
 			}
 
-			case Args::ColorType::SOLID:
+			case ColorType::SOLID:
 			{
 				const auto [r, g, b] = args.rgb;
 				std::cout << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
 				break;
 			}
 
-			case Args::ColorType::NONE:
+			case ColorType::NONE:
 				break;
 
 			default:
@@ -121,20 +133,34 @@ void _main(const Args &args)
 				std::cout << character << "\e[1A\e[1D";
 			}
 		}
+
+		t += args.wheel_rate;
 	}
 }
 
-void exit_handler()
-{
-	std::cout << "\ec";
-}
+// void exit_handler()
+// {
+// 	std::cout << "\ec";
+// }
 
 int main(const int argc, const char *const *const argv)
 {
-	atexit(exit_handler);
+	// atexit(exit_handler);
 	try
 	{
-		_main(Args(argc, argv));
+		// _main(Args(argc, argv));
+		Args args(argc, argv);
+		termviz(args.audio_file)
+			.set_scale(args.scale)
+			.set_interp_type(args.interp)
+			.set_nth_root(args.nth_root)
+			.set_sample_size(args.fft_size)
+			.set_characters(args.characters)
+			.set_color_type(args.color)
+			.set_wheel_rate(args.wheel_rate)
+			.set_rgb(args.rgb)
+			.set_hsv(args.hsv)
+			.start();
 	}
 	catch (const std::exception &e)
 	{

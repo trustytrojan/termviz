@@ -15,7 +15,7 @@ public:
 		NTH_ROOT
 	};
 
-	enum class InterpolationType
+	enum class InterpType
 	{
 		NONE,
 		LINEAR = tk::spline::linear,
@@ -28,8 +28,9 @@ private:
 	std::vector<kiss_fft_cpx> freqdata;
 	int nth_root = 2;
 	tk::spline spline;
-	InterpolationType interp;
+	InterpType interp;
 	Scale scale;
+	float fftsize_inv;
 
 	struct
 	{
@@ -51,7 +52,7 @@ public:
 	 */
 	FrequencySpectrum(const int fft_size,
 					  const Scale scale = Scale::LOG,
-					  const InterpolationType interp = InterpolationType::CSPLINE)
+					  const InterpType interp = InterpType::CSPLINE)
 		: kf(fft_size),
 		  freqdata(fft_size / 2 + 1),
 		  interp(interp),
@@ -69,6 +70,7 @@ public:
 	{
 		kf.set_fft_size(fft_size);
 		freqdata.resize(fft_size / 2 + 1);
+		fftsize_inv = 1. / fft_size;
 		scale_max.set(*this);
 	}
 
@@ -76,7 +78,7 @@ public:
 	 * Set interpolation type.
 	 * @param interp new interpolation type to use
 	 */
-	void set_interp_type(const InterpolationType interp_type)
+	void set_interp_type(const InterpType interp_type)
 	{
 		this->interp = interp_type;
 	}
@@ -124,18 +126,24 @@ public:
 		{
 			const auto [re, im] = freqdata[i];
 			const float amplitude = sqrt((re * re) + (im * im));
+			// TODO: try a max instead of a sum
 			spectrum[calc_index(i, (int)spectrum.size() - 1)] += amplitude;
 		}
 
+		// downscale all amplitudes by 1 / fft_size
+		// this is because with smaller fft_size's, frequency bins are bigger
+		// so more frequencies get lumped together, causing higher amplitudes per bin.
+		std::ranges::for_each(spectrum, [this](float &f){ f *= fftsize_inv; });
+
 		// apply interpolation if necessary
-		if (interp != InterpolationType::NONE && scale != Scale::LINEAR)
+		if (interp != InterpType::NONE && scale != Scale::LINEAR)
 			interpolate(spectrum);
 	}
 
 private:
 	int calc_index(const int i, const int max_index)
 	{
-		return std::max(0, std::min((int)(calc_index_ratio(i) * max_index), max_index));
+		return std::max(0, std::min((int)(calc_index_ratio(i) * max_index), max_index - 1));
 	}
 
 	float calc_index_ratio(const float i)

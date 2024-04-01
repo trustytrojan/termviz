@@ -2,18 +2,17 @@
 
 #include <argparse/argparse.hpp>
 #include "FrequencySpectrum.hpp"
+#include "termviz.hpp"
 
 using argparse::ArgumentParser;
 
-struct Args : private ArgumentParser
+class Args : private ArgumentParser
 {
-	enum class ColorType
-	{
-		WHEEL,
-		SOLID,
-		NONE
-	};
+	using ColorType = termviz::ColorType;
+	using Scale = FrequencySpectrum::Scale;
+	using InterpType = FrequencySpectrum::InterpType;
 
+public:
 	std::string audio_file;
 	int fft_size;
 
@@ -23,12 +22,13 @@ struct Args : private ArgumentParser
 	int nth_root = 0;
 
 	// spectrum scale
-	FrequencySpectrum::Scale scale;
-	FrequencySpectrum::InterpolationType interp;
+	Scale scale;
+	InterpType interp;
 
 	ColorType color;
 	std::tuple<float, float, float> hsv{0, 1, 1};
 	std::tuple<int, int, int> rgb;
+	float wheel_rate = 0;
 
 	Args(const int argc, const char *const *const argv)
 		: ArgumentParser(argv[0])
@@ -71,12 +71,16 @@ struct Args : private ArgumentParser
 			.choices("wheel", "solid", "none")
 			.default_value("wheel")
 			.validate();
+		add_argument("--wheel-rate")
+			.help("when used with '--color wheel', moves the wheel with time!\nvalue must be between [0, 1]\nmoves the color wheel at the specified rate\n0.005 is a good start")
+			.scan<'f', float>()
+			.validate();
 		add_argument("--hsv")
 			.help("requires '--color wheel'\nchoose a hue offset for the color wheel, saturation, and brightness\nvalues must be between [0, 1]")
 			.nargs(3)
 			.validate();
 		add_argument("--rgb")
-			.help("required by '--color solid'\nrenders the spectrum with a solid color\nmust provide space-separated rgb integers")
+			.help("requires '--color solid'\nrenders the spectrum with a solid color\nmust provide space-separated rgb integers")
 			.nargs(3)
 			.validate();
 
@@ -133,13 +137,13 @@ private:
 		{ // interpolation type
 			const auto &interp_str = get("-i");
 			if (interp_str == "none")
-				interp = FrequencySpectrum::InterpolationType::NONE;
+				interp = InterpType::NONE;
 			else if (interp_str == "linear")
-				interp = FrequencySpectrum::InterpolationType::LINEAR;
+				interp = InterpType::LINEAR;
 			else if (interp_str == "cspline")
-				interp = FrequencySpectrum::InterpolationType::CSPLINE;
+				interp = InterpType::CSPLINE;
 			else if (interp_str == "cspline_hermite")
-				interp = FrequencySpectrum::InterpolationType::CSPLINE_HERMITE;
+				interp = InterpType::CSPLINE_HERMITE;
 			else
 				throw std::logic_error("????");
 		}
@@ -157,9 +161,8 @@ private:
 			{
 				color = ColorType::SOLID;
 				const auto &rgb_strs = get<std::vector<std::string>>("--rgb");
-				if (!rgb_strs.size())
-					throw std::invalid_argument("option '--rgb' required by '--color solid'");
-				rgb = {std::stoi(rgb_strs[0]), std::stoi(rgb_strs[1]), std::stoi(rgb_strs[2])};
+				if (rgb_strs.size())
+					rgb = {std::stoi(rgb_strs[0]), std::stoi(rgb_strs[1]), std::stoi(rgb_strs[2])};
 			}
 			else if (color_str == "none")
 				color = ColorType::NONE;
@@ -167,14 +170,26 @@ private:
 				throw std::logic_error("?????????");
 		}
 
+		try
+		{
+			wheel_rate = get<float>("--wheel-rate");
+		}
+		catch (const std::logic_error &e)
+		{
+			wheel_rate = 0;
+		}
+
+		if (wheel_rate && color != ColorType::WHEEL)
+			throw std::logic_error("'--wheel-rate' requires '--color wheel'");
+
 		{ // frequency scale (x-axis)
 			const auto &scale = get("-s");
 			if (scale == "linear")
-				this->scale = FrequencySpectrum::Scale::LINEAR;
+				this->scale = Scale::LINEAR;
 			else if (scale == "log")
-				this->scale = FrequencySpectrum::Scale::LOG;
+				this->scale = Scale::LOG;
 			else if (scale == "nth-root")
-				this->scale = FrequencySpectrum::Scale::NTH_ROOT;
+				this->scale = Scale::NTH_ROOT;
 			else
 				throw std::logic_error("impossible!!!!");
 		}
