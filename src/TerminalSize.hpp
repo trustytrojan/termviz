@@ -10,13 +10,8 @@ struct TerminalSize
 	TerminalSize()
 	{
 		winsize ws;
-
 		if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1)
-		{
-			perror("ioctl");
-			throw std::runtime_error("ioctl() failed");
-		}
-
+			throw std::runtime_error(std::string("ioctl: ") + strerror(errno));
 		width = ws.ws_col;
 		height = ws.ws_row;
 	}

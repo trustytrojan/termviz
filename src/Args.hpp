@@ -16,7 +16,7 @@ public:
 	std::string audio_file;
 	int fft_size;
 
-	float multiplier;
+	float multiplier = 3;
 	std::string characters;
 	char peak_char;
 	int nth_root = 0;
@@ -26,7 +26,7 @@ public:
 	InterpType interp;
 
 	ColorType color;
-	std::tuple<float, float, float> hsv{0, 1, 1};
+	std::tuple<float, float, float> hsv{0.9, 0.7, 1};
 	std::tuple<int, int, int> rgb;
 	float wheel_rate = 0;
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mutex>
 #include <sndfile.hh>
 #include "FrequencySpectrum.hpp"
 #include "ColorUtils.hpp"
@@ -19,6 +20,9 @@ public:
 private:
 	using Scale = FrequencySpectrum::Scale;
 	using InterpType = FrequencySpectrum::InterpType;
+
+	// in case multiple threads use this object!
+	std::mutex mutex;
 
 	// the most important value
 	int sample_size = 2048;
@@ -55,13 +59,9 @@ private:
 	// spectrum - final multiplier
 	float multiplier = 3;
 
-	// output stream, default std::cout
-	std::ostream &ostr;
-
 public:
-	termviz(const std::string &path, std::ostream &ostr = std::cout)
-		: sf(path),
-		  ostr(ostr),
+	termviz(const std::string &audio_file)
+		: sf(audio_file),
 		  fs(sample_size),
 		  timedata(sample_size),
 		  audio_buffer(sample_size * sf.channels()),
@@ -72,16 +72,18 @@ public:
 	{
 		while (render_frame())
 			;
-		ostr << "\ec";
+		std::cout << "\ec";
 	}
 
 	termviz &set_sample_size(const int sample_size)
 	{
+		mutex.lock();
 		this->sample_size = sample_size;
 		fs.set_fft_size(sample_size);
 		timedata.resize(sample_size);
 		audio_buffer.resize(sample_size * sf.channels());
 		pa_stream.reopen(0, 2, paFloat32, sf.samplerate(), sample_size);
+		mutex.unlock();
 		return *this;
 	}
 
@@ -185,6 +187,7 @@ private:
 
 	bool render_frame()
 	{
+		mutex.lock();
 		check_tsize_update();
 		const auto frames_read = sf.readf(audio_buffer.data(), sample_size);
 		if (!frames_read)
@@ -194,8 +197,9 @@ private:
 			return false;
 		copy_channel_to_timedata(1);
 		fs.render(timedata.data(), spectrum);
-		ostr << "\ec";
+		std::cout << "\ec";
 		print_spectrum();
+		mutex.unlock();
 		return true;
 	}
 
@@ -204,7 +208,7 @@ private:
 		for (int i = 0; i < tsize.width; ++i)
 		{
 			// calculate height based on amplitude
-			int bar_height = spectrum[i] * tsize.height;
+			int bar_height = multiplier * spectrum[i] * tsize.height;
 
 			// apply coloring if necessary
 			switch (color_type)
@@ -213,7 +217,7 @@ private:
 			{
 				const auto [h, s, v] = hsv;
 				const auto [r, g, b] = ColorUtils::hsvToRgb(((float)i / tsize.width) + h + wheel_time, s, v);
-				ostr << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
+				std::cout << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
 				break;
 			}
 
@@ -221,7 +225,7 @@ private:
 			{
 				// need to print everytime because clearing the terminal also clears color modes
 				const auto [r, g, b] = rgb;
-				ostr << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
+				std::cout << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
 				break;
 			}
 
@@ -234,7 +238,7 @@ private:
 
 			// move cursor to (height, i)
 			// remember that (0, 0) in a terminal is the top-left corner, so positive y moves the cursor down.
-			ostr << "\e[" << tsize.height << ';' << i << 'f';
+			std::cout << "\e[" << tsize.height << ';' << i << 'f';
 
 			// draw the bar upwards `bar_height` high
 			for (int j = 0; j < bar_height; ++j)
@@ -247,7 +251,7 @@ private:
 				else
 					character = characters[j % characters.length()];
 
-				ostr << character << "\e[1A\e[1D";
+				std::cout << character << "\e[1A\e[1D";
 			}
 		}
 

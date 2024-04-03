@@ -133,7 +133,8 @@ public:
 		// downscale all amplitudes by 1 / fft_size
 		// this is because with smaller fft_size's, frequency bins are bigger
 		// so more frequencies get lumped together, causing higher amplitudes per bin.
-		std::ranges::for_each(spectrum, [this](float &f){ f *= fftsize_inv; });
+		for (auto &a : spectrum)
+			a *= fftsize_inv;
 
 		// apply interpolation if necessary
 		if (interp != InterpType::NONE && scale != Scale::LINEAR)
