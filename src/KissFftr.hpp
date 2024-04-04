@@ -10,11 +10,13 @@ public:
 	/**
 	 * Initializes a `kiss_fftr_cfg` internally.
 	 * `kissfft` requires an even `fft_size` because the data it outputs is half that size.
-	 * @param fft_size sample chunk size fed into the `transform` method
-	 * @throws `std::invalid_argument` if `fft_size` is not even.
+	 * @param fft_size nonzero sample chunk size fed into the `transform` method
+	 * @throws `std::invalid_argument` if `fft_size` is zero or not even.
 	 */
 	KissFftr(const int fft_size)
 	{
+		if (!fft_size)
+			throw std::invalid_argument("fft_size must be nonzero");
 		if (fft_size & 1)
 			throw std::invalid_argument("fft_size must be even");
 		cfg = kiss_fftr_alloc(fft_size, false, NULL, NULL);
@@ -29,10 +31,12 @@ public:
 	 * Set the FFT size, aka the sample chunk size fed into the `transform` method.
 	 * `kissfft` requires an even `fft_size` because the data it outputs is half that size.
 	 * @param fft_size new fft size to use
-	 * @throws `std::invalid_argument` if `fft_size` is not even
+	 * @throws `std::invalid_argument` if `fft_size` is zero or not even
 	 */
 	void set_fft_size(const int fft_size)
 	{
+		if (!fft_size)
+			throw std::invalid_argument("fft_size must be nonzero");
 		if (fft_size & 1)
 			throw std::invalid_argument("fft_size must be even");
 		kiss_fftr_free(cfg);

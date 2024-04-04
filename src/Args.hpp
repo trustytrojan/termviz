@@ -18,8 +18,8 @@ public:
 
 	float multiplier = 3;
 	std::string characters;
-	char peak_char;
-	int nth_root = 0;
+	char peak_char = 0;
+	float nth_root = 2;
 
 	// spectrum scale
 	Scale scale;
@@ -96,7 +96,6 @@ public:
 					  << *this;
 
 			// just exit here since we don't want to print anything after the help
-			// call _Exit instead of exit to not trigger the exit handler in main.cpp
 			_Exit(EXIT_FAILURE);
 		}
 	}
@@ -145,7 +144,7 @@ private:
 			else if (interp_str == "cspline_hermite")
 				interp = InterpType::CSPLINE_HERMITE;
 			else
-				throw std::logic_error("????");
+				throw std::invalid_argument("unknown interpolation type: " + interp_str);
 		}
 
 		{ // spectrum coloring type
@@ -167,7 +166,7 @@ private:
 			else if (color_str == "none")
 				color = ColorType::NONE;
 			else
-				throw std::logic_error("?????????");
+				throw std::invalid_argument("unknown coloring type: " + color_str);
 		}
 
 		try
@@ -176,22 +175,21 @@ private:
 		}
 		catch (const std::logic_error &e)
 		{
-			wheel_rate = 0;
 		}
 
 		if (wheel_rate && color != ColorType::WHEEL)
 			throw std::logic_error("'--wheel-rate' requires '--color wheel'");
 
 		{ // frequency scale (x-axis)
-			const auto &scale = get("-s");
-			if (scale == "linear")
-				this->scale = Scale::LINEAR;
-			else if (scale == "log")
-				this->scale = Scale::LOG;
-			else if (scale == "nth-root")
-				this->scale = Scale::NTH_ROOT;
+			const auto &scale_str = get("-s");
+			if (scale_str == "linear")
+				scale = Scale::LINEAR;
+			else if (scale_str == "log")
+				scale = Scale::LOG;
+			else if (scale_str == "nth-root")
+				scale = Scale::NTH_ROOT;
 			else
-				throw std::logic_error("impossible!!!!");
+				throw std::invalid_argument("unknown scale: " + scale_str);
 		}
 	}
 };

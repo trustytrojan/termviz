@@ -27,6 +27,7 @@ private:
 	KissFftr kf;
 	std::vector<kiss_fft_cpx> freqdata;
 	int nth_root = 2;
+	float nth_root_inverse = 1.f / nth_root;
 	tk::spline spline;
 	InterpType interp;
 	Scale scale;
@@ -100,8 +101,9 @@ public:
 	void set_nth_root(const int nth_root)
 	{
 		if (!nth_root)
-			throw std::invalid_argument("preventing division by zero");
+			throw std::invalid_argument("nth_root cannot be zero!");
 		this->nth_root = nth_root;
+		nth_root_inverse = 1.f / nth_root;
 	}
 
 	/**
@@ -132,7 +134,7 @@ public:
 			// spectrum[index] = std::max(spectrum[index], amplitude);
 
 			// TODO: need to find a stragety to preserve treble signature without losing it
-			
+
 			// sum strategy - works PERFECTLY, but might be exaggerating treble frequencies
 			// until i find a new strategy, i'm sticking with this because it looks cooler
 			spectrum[index] += amplitude;
@@ -173,10 +175,10 @@ private:
 			case 3:
 				return cbrt(i) / scale_max.cbrt;
 			default:
-				return pow(i, 1 / nth_root) / scale_max.nthroot;
+				return pow(i, nth_root_inverse) / scale_max.nthroot;
 			}
 		default:
-			throw std::logic_error("impossible!!!!!!!");
+			throw std::logic_error("calc_index_ratio: default case hit");
 		}
 	}
 
