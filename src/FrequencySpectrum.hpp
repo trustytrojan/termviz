@@ -23,16 +23,49 @@ public:
 		CSPLINE_HERMITE = tk::spline::cspline_hermite
 	};
 
+	enum class AccumulationMethod
+	{
+		SUM,
+		MAX
+	};
+
+	enum class WindowFunction
+	{
+		NONE,
+		HANNING,
+		HAMMING,
+		BLACKMAN
+	};
+
 private:
-	KissFftr kf;
-	std::vector<kiss_fft_cpx> freqdata;
+	// fft size
+	int fft_size;
+	float fftsize_inv = 1.f / fft_size;
+
+	// nth root
 	int nth_root = 2;
 	float nth_root_inverse = 1.f / nth_root;
-	tk::spline spline;
-	InterpType interp;
-	Scale scale;
-	float fftsize_inv;
 
+	// kiss_fftr initialization
+	KissFftr kf = KissFftr(fft_size);
+
+	// vector to store output of fft
+	std::vector<kiss_fft_cpx> freqdata = std::vector<kiss_fft_cpx>(fft_size / 2 + 1);
+
+	// interpolation
+	tk::spline spline;
+	InterpType interp = InterpType::CSPLINE;
+
+	// output spectrum scale
+	Scale scale = Scale::LOG;
+
+	// method for accumulating amplitudes in frequency bins
+	AccumulationMethod am = AccumulationMethod::SUM;
+
+	// window function
+	WindowFunction wf = WindowFunction::BLACKMAN;
+
+	// struct to hold the "max"s used in `calc_index_ratio`
 	struct
 	{
 		double log, sqrt, cbrt, nthroot;
@@ -42,7 +75,7 @@ private:
 			log = ::log(max);
 			sqrt = ::sqrt(max);
 			cbrt = ::cbrt(max);
-			nthroot = ::pow(max, 1. / fs.nth_root);
+			nthroot = ::pow(max, fs.nth_root_inverse);
 		}
 	} scale_max;
 
@@ -51,13 +84,7 @@ public:
 	 * Initialize frequency spectrum renderer.
 	 * @param fft_size sample chunk size fed into the `transform` method
 	 */
-	FrequencySpectrum(const int fft_size,
-					  const Scale scale = Scale::LOG,
-					  const InterpType interp = InterpType::CSPLINE)
-		: kf(fft_size),
-		  freqdata(fft_size / 2 + 1),
-		  interp(interp),
-		  scale(scale)
+	FrequencySpectrum(const int fft_size) : fft_size(fft_size)
 	{
 		scale_max.set(*this);
 	}
@@ -65,45 +92,75 @@ public:
 	/**
 	 * Set the FFT size used in the `kissfft` library.
 	 * @param fft_size new fft size to use
+	 * @returns reference to self
 	 * @throws `std::invalid_argument` if `fft_size` is not even
 	 */
-	void set_fft_size(const int fft_size)
+	FrequencySpectrum &set_fft_size(const int fft_size)
 	{
 		kf.set_fft_size(fft_size);
 		freqdata.resize(fft_size / 2 + 1);
 		fftsize_inv = 1. / fft_size;
 		scale_max.set(*this);
+		return *this;
 	}
 
 	/**
 	 * Set interpolation type.
 	 * @param interp new interpolation type to use
+	 * @returns reference to self
 	 */
-	void set_interp_type(const InterpType interp_type)
+	FrequencySpectrum &set_interp_type(const InterpType interp)
 	{
-		this->interp = interp_type;
+		this->interp = interp;
+		return *this;
+	}
+
+	/**
+	 * Set window function.
+	 * @param interp new window function to use
+	 * @returns reference to self
+	 */
+	FrequencySpectrum &set_window_func(const WindowFunction wf)
+	{
+		this->wf = wf;
+		return *this;
+	}
+
+	/**
+	 * Set frequency bin accumulation method.
+	 * @param interp new accumulation method to use
+	 * @returns reference to self
+	 */
+	FrequencySpectrum &set_accum_method(const AccumulationMethod am)
+	{
+		this->am = am;
+		return *this;
 	}
 
 	/**
 	 * Set the spectrum's frequency scale.
 	 * @param scale new scale to use
+	 * @returns reference to self
 	 */
-	void set_scale(const Scale scale)
+	FrequencySpectrum &set_scale(const Scale scale)
 	{
 		this->scale = scale;
+		return *this;
 	}
 
 	/**
 	 * Set the nth-root to use when using the `NTH_ROOT` scale.
 	 * @param nth_root new nth_root to use
+	 * @returns reference to self
 	 * @throws `std::invalid_argument` if `nth_root` is zero
 	 */
-	void set_nth_root(const int nth_root)
+	FrequencySpectrum &set_nth_root(const int nth_root)
 	{
 		if (!nth_root)
-			throw std::invalid_argument("nth_root cannot be zero!");
+			throw std::invalid_argument("FrequencySpectrun::set_nth_root: nth_root cannot be zero!");
 		this->nth_root = nth_root;
 		nth_root_inverse = 1.f / nth_root;
+		return *this;
 	}
 
 	/**
@@ -114,13 +171,15 @@ public:
 	 *                 so make sure you set it correctly.
 	 * @throws `std::invalid_argument` if `timedata` is null
 	 */
-	void render(const float *const timedata, std::vector<float> &spectrum)
+	void render(float *const timedata, std::vector<float> &spectrum)
 	{
+		apply_window_func(timedata);
+
 		// perform fft: frequency range to amplitude values are stored in freqdata
 		// throws if either argument is null
 		kf.transform(timedata, freqdata.data());
 
-		// zero out array since we are creating sums
+		// zero out array since we are accumulating
 		std::ranges::fill(spectrum, 0);
 
 		// map frequency bins of freqdata to spectrum
@@ -128,16 +187,21 @@ public:
 		{
 			const auto [re, im] = freqdata[i];
 			const float amplitude = sqrt((re * re) + (im * im));
-			const auto index = calc_index(i, (int)spectrum.size() - 1);
+			const auto index = calc_index(i, spectrum.size());
 
-			// max strategy - best strategy overall, but there is no signature of treble frequencies!
-			// spectrum[index] = std::max(spectrum[index], amplitude);
-
-			// TODO: need to find a stragety to preserve treble signature without losing it
-
-			// sum strategy - works PERFECTLY, but might be exaggerating treble frequencies
-			// until i find a new strategy, i'm sticking with this because it looks cooler
-			spectrum[index] += amplitude;
+			switch (am)
+			{
+			case AccumulationMethod::SUM:
+				spectrum[index] += amplitude;
+				break;
+			
+			case AccumulationMethod::MAX:
+				spectrum[index] = std::max(spectrum[index], amplitude);
+				break;
+			
+			default:
+				throw std::logic_error("FrequencySpectrum::render: switch(accum_type): default case hit");
+			}
 		}
 
 		// downscale all amplitudes by 1 / fft_size
@@ -152,6 +216,33 @@ public:
 	}
 
 private:
+	void apply_window_func(float *const timedata)
+	{
+		switch (wf)
+		{
+		case WindowFunction::HANNING:
+			for (int i = 0; i < fft_size; ++i)
+				timedata[i] *= 0.5f * (1 - cos(2 * M_PI * i / (fft_size - 1)));
+			break;
+
+		case WindowFunction::HAMMING:
+			for (int i = 0; i < fft_size; ++i)
+				timedata[i] *= 0.54f - 0.46f * cos(2 * M_PI * i / (fft_size - 1));
+			break;
+
+		case WindowFunction::BLACKMAN:
+			for (int i = 0; i < fft_size; ++i)
+				timedata[i] *= 0.42f - 0.5f * cos(2 * M_PI * i / (fft_size - 1)) + 0.08f * cos(4 * M_PI * i / (fft_size - 1));
+			break;
+
+		case WindowFunction::NONE:
+			break;
+
+		default:
+			throw std::logic_error("FrequencySpectrum::apply_window_func: default case hit");
+		}
+	}
+
 	int calc_index(const int i, const int max_index)
 	{
 		return std::max(0, std::min((int)(calc_index_ratio(i) * max_index), max_index - 1));
@@ -164,7 +255,9 @@ private:
 		case Scale::LINEAR:
 			return i / freqdata.size();
 		case Scale::LOG:
-			return log(i ? i : 1) / scale_max.log;
+			// TODO: make log curve shift with fft_size (better approach: horizontal shrink)
+			// this will avoid the shifting down of all frequencies as fft_size decreases.
+			return std::log(i ? i : 1) / scale_max.log;
 		case Scale::NTH_ROOT:
 			switch (nth_root)
 			{
@@ -178,7 +271,7 @@ private:
 				return pow(i, nth_root_inverse) / scale_max.nthroot;
 			}
 		default:
-			throw std::logic_error("calc_index_ratio: default case hit");
+			throw std::logic_error("FrequencySpectrum::calc_index_ratio: default case hit");
 		}
 	}
 

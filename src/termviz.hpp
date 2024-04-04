@@ -17,10 +17,12 @@ public:
 		SOLID
 	};
 
-private:
 	using Scale = FrequencySpectrum::Scale;
 	using InterpType = FrequencySpectrum::InterpType;
+	using AccumulationMethod = FrequencySpectrum::AccumulationMethod;
+	using WindowFunction = FrequencySpectrum::WindowFunction;
 
+private:
 	// in case multiple threads use this object!
 	std::mutex mutex;
 
@@ -35,40 +37,44 @@ private:
 
 	// terminal width and height
 	TerminalSize tsize;
-	bool stereo_mirrored = true;
+	bool stereo = (sf.channels() == 2);
+	bool mirrored = false;
 
 	// intermediate arrays
-	std::vector<float> timedata, audio_buffer, spectrum;
+	std::vector<float>
+		timedata = std::vector<float>(sample_size),
+		audio_buffer = std::vector<float>(sample_size * sf.channels()),
+		spectrum = std::vector<float>(stereo ? (tsize.width / 2) : tsize.width);
 
 	// audio
 	PortAudio pa;
-	PortAudio::Stream pa_stream;
+	PortAudio::Stream pa_stream = pa.stream(0, sf.channels(), paFloat32, sf.samplerate(), sample_size);
 
 	// color
 	ColorType color_type = ColorType::WHEEL;
-	std::tuple<float, float, float> hsv{0.9, 0.7, 1};
-	std::tuple<int, int, int> rgb{255, 0, 255};
+	std::tuple<int, int, int> solid_rgb{255, 0, 255};
 
 	// characters
-	char peak_char;
-	std::string characters;
+	char peak_char = 0;
+	std::string characters = "#";
 
 	// color wheel rotation
-	float wheel_time = 0;
-	float wheel_rate = 0;
+	struct
+	{
+		float time = 0, rate = 0;
+		std::tuple<float, float, float> hsv{0.9, 0.7, 1};
+	} wheel;
 
 	// spectrum - final multiplier
 	float multiplier = 3;
 
 public:
-	termviz(const std::string &audio_file)
-		: sf(audio_file),
-		  fs(sample_size),
-		  timedata(sample_size),
-		  audio_buffer(sample_size * sf.channels()),
-		  spectrum(stereo_mirrored ? (tsize.width / 2) : tsize.width),
-		  pa_stream(pa.stream(0, sf.channels(), paFloat32, sf.samplerate(), sample_size)) {}
+	termviz(const std::string &audio_file) : sf(audio_file), fs(sample_size) {}
 
+	/**
+	 * Start rendering the spectrum to the terminal!
+	 * @note Blocks until finished.
+	 */
 	void start()
 	{
 		while (render_frame())
@@ -76,6 +82,13 @@ public:
 		std::cout << "\ec";
 	}
 
+	/**
+	 * Set the sample chunk size to use in internal calculations.
+	 * @note Smaller values increase responsiveness, but decrease accuracy. Larger values do the opposite.
+	 * @note This method is thread safe.
+	 * @param sample_size new sample size to use
+	 * @return reference to self
+	 */
 	termviz &set_sample_size(const int sample_size)
 	{
 		mutex.lock();
@@ -88,45 +101,80 @@ public:
 		return *this;
 	}
 
+	/**
+	 * Set the character(s) to print (in order) as the bar is printed upwards.
+	 * @param characters new characters to use
+	 * @return reference to self
+	 */
 	termviz &set_characters(const std::string &characters)
 	{
 		this->characters = characters;
 		return *this;
 	}
 
+	/**
+	 * Set the character to print at the peak of a spectrum bar.
+	 * @param peak_char new peak char to use
+	 * @return reference to self
+	 */
 	termviz &set_peak_char(const char peak_char)
 	{
 		this->peak_char = peak_char;
 		return *this;
 	}
 
+	/**
+	 * Set the spectrum coloring type.
+	 * @param color_type new coloring type to use
+	 * @return reference to self
+	 */
 	termviz &set_color_type(const ColorType color_type)
 	{
 		this->color_type = color_type;
 		return *this;
 	}
 
-	termviz &set_wheel_rate(const float wheel_rate)
+	/**
+	 * Set the rate at which the color wheel rotates during playback.
+	 * A sane default is 0.005, though there is no restriction.
+	 * A value of 0 disables rotation altogether.
+	 * @param rate new wheel rate to use
+	 * @return reference to self
+	 */
+	termviz &set_wheel_rate(const float rate)
 	{
-		this->wheel_rate = wheel_rate;
+		wheel.rate = rate;
 		return *this;
 	}
 
-	termviz &set_rgb(const std::tuple<int, int, int> rgb)
+	/**
+	 * Set the color to use when coloring the spectrum with a solid color.
+	 * You will only see the change if the color type is set to `SOLID`.
+	 * @param rgb (red, green, blue) tuple
+	 * @return reference to self
+	 */
+	termviz &set_solid_color(const std::tuple<int, int, int> rgb)
 	{
-		this->rgb = rgb;
+		this->solid_rgb = rgb;
 		return *this;
 	}
 
-	termviz &set_hsv(const std::tuple<float, float, float> hsv)
+	/**
+	 * Set the hue offset, saturation, and value (brightness) of the color wheel.
+	 * You will only see the change if the color type is set to `WHEEL`.
+	 * @param hsv (hue, saturation, value) tuple
+	 * @return reference to self
+	 */
+	termviz &set_wheel_hsv(const std::tuple<float, float, float> hsv)
 	{
-		this->hsv = hsv;
+		wheel.hsv = hsv;
 		return *this;
 	}
 
 	/**
 	 * Set interpolation type.
 	 * @param interp new interpolation type to use
+	 * @returns reference to self
 	 */
 	termviz &set_interp_type(const InterpType interp_type)
 	{
@@ -137,6 +185,7 @@ public:
 	/**
 	 * Set the spectrum's frequency scale.
 	 * @param scale new scale to use
+	 * @returns reference to self
 	 */
 	termviz &set_scale(const Scale scale)
 	{
@@ -147,6 +196,7 @@ public:
 	/**
 	 * Set the nth-root to use when using the `NTH_ROOT` scale.
 	 * @param nth_root new nth_root to use
+	 * @returns reference to self
 	 * @throws `std::invalid_argument` if `nth_root` is zero
 	 */
 	termviz &set_nth_root(const int nth_root)
@@ -155,9 +205,48 @@ public:
 		return *this;
 	}
 
+	/**
+	 * Set frequency bin accumulation method.
+	 * @note Choosing `SUM` results in more visible detail in the treble frequencies, at the cost of their amplitudes being visually exaggerated.
+	 * @note Choosing `MAX` results in a more true-to-waveform frequency distribution, however treble frequencies aren't very visible.
+	 * @param interp new accumulation method to use
+	 * @returns reference to self
+	 */
+	termviz &set_accum_method(const AccumulationMethod method)
+	{
+		fs.set_accum_method(method);
+		return *this;
+	}
+
+	/**
+	 * Set window function.
+	 * @param interp new window function to use
+	 * @returns reference to self
+	 */
+	termviz &set_window_function(const WindowFunction wf)
+	{
+		fs.set_window_func(wf);
+		return *this;
+	}
+
+	/**
+	 * Set the multiplier to multiply the spectrum's height by.
+	 * @param multiplier new multiplier to use
+	 * @return reference to self
+	 */
 	termviz &set_multiplier(const float multiplier)
 	{
 		this->multiplier = multiplier;
+		return *this;
+	}
+
+	/**
+	 * Enable or disable a mirrored spectrum with stereo support.
+	 * For the mirrored spectrum to actually be stereo, the audio must be stereo. Otherwise the same channel of audio is rendered twice.
+	 */
+	termviz &set_stereo(const bool b)
+	{
+		stereo = b;
 		return *this;
 	}
 
@@ -168,7 +257,7 @@ private:
 
 		if (tsize.width != new_tsize.width)
 		{
-			spectrum.resize(stereo_mirrored ? (new_tsize.width / 2) : new_tsize.width);
+			spectrum.resize(stereo ? (new_tsize.width / 2) : new_tsize.width);
 			tsize.width = new_tsize.width;
 		}
 
@@ -193,26 +282,44 @@ private:
 		const auto frames_read = sf.readf(audio_buffer.data(), sample_size);
 		if (!frames_read)
 			return false;
-		pa_stream.write(audio_buffer.data(), sample_size);
+
+		try
+		{
+			pa_stream.write(audio_buffer.data(), sample_size);
+		}
+		catch (const PortAudio::Error &e)
+		{
+			if (!strstr(e.what(), "Output underflowed"))
+				throw;
+		}
+
 		if (frames_read != sample_size)
 			return false;
 		std::cout << "\ec";
-		if (stereo_mirrored)
-		{
-			copy_channel_to_timedata(1);
-			fs.render(timedata.data(), spectrum);
-			print_mirrored_1st_half();
 
-			copy_channel_to_timedata(2);
-			fs.render(timedata.data(), spectrum);
-			print_mirrored_2nd_half();
+		if (color_type == ColorType::SOLID)
+		{
+			// clearing the terminal also clears color modes
+			const auto [r, g, b] = solid_rgb;
+			std::cout << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
 		}
+
+		if (stereo)
+			for (int i = 1; i <= 2; ++i)
+			{
+				copy_channel_to_timedata(i);
+				fs.render(timedata.data(), spectrum);
+				print_half(i);
+			}
 		else
 		{
 			copy_channel_to_timedata(1);
 			fs.render(timedata.data(), spectrum);
 			print_spectrum_full();
 		}
+
+		wheel.time += wheel.rate;
+
 		mutex.unlock();
 		return true;
 	}
@@ -221,64 +328,58 @@ private:
 	{
 		for (int i = 0; i < tsize.width; ++i)
 		{
-			apply_coloring(i, [this](const int i)
-						   { return (float)i / tsize.width; });
+			if (color_type == ColorType::WHEEL)
+				apply_wheel_coloring(i, [this](const int i)
+									 { return (float)i / tsize.width; });
 			move_to_column(i);
 			print_bar(multiplier * spectrum[tsize.width - i] * tsize.height);
 		}
-		wheel_time += wheel_rate;
 	}
 
-	void print_mirrored_1st_half()
+	void print_spectrum_full_backwards()
+	{
+		for (int i = tsize.width - 1; i >= 0; --i)
+		{
+			if (color_type == ColorType::WHEEL)
+				apply_wheel_coloring(i, [this](const int i)
+									 { return (float)(tsize.width - i) / tsize.width; });
+			move_to_column(i);
+			print_bar(multiplier * spectrum[tsize.width - i] * tsize.height);
+		}
+	}
+
+	void print_half(int half)
 	{
 		const auto half_width = tsize.width / 2;
-		for (int i = half_width; i >= 0; --i)
-		{
-			apply_coloring(i, [half_width](const int i)
-						   { return ((float)half_width - i) / half_width; });
-			move_to_column(i);
-			print_bar(multiplier * spectrum[half_width - i] * tsize.height);
-		}
+
+		if (half == 1)
+			for (int i = half_width; i >= 0; --i)
+			{
+				if (color_type == ColorType::WHEEL)
+					apply_wheel_coloring(i, [half_width](const int i)
+										 { return (float)(half_width - i) / half_width; });
+				move_to_column(i);
+				print_bar(multiplier * spectrum[half_width - i] * tsize.height);
+			}
+
+		else if (half == 2)
+			for (int i = half_width; i < tsize.width; ++i)
+			{
+				if (color_type == ColorType::WHEEL)
+					apply_wheel_coloring(i, [half_width](const int i)
+										 { return (float)i / half_width; });
+				move_to_column(i);
+				print_bar(multiplier * spectrum[i - half_width] * tsize.height);
+			}
 	}
 
-	void print_mirrored_2nd_half()
+	void apply_wheel_coloring(const int i, const std::function<float(int)> &ratio_calc)
 	{
-		const auto half_width = tsize.width / 2;
-		for (int i = half_width; i < tsize.width; ++i)
-		{
-			apply_coloring(i, [half_width](const int i)
-						   { return (float)i / half_width; });
-			move_to_column(i);
-			print_bar(multiplier * spectrum[i - half_width] * tsize.height);
-		}
-	}
-
-	void apply_coloring(const int i, const std::function<float(int)> &ratio_calc)
-	{
-		switch (color_type)
-		{
-		case ColorType::WHEEL:
-		{
-			const auto [h, s, v] = hsv;
-			const auto [r, g, b] = ColorUtils::hsvToRgb(ratio_calc(i) + h + wheel_time, s, v);
-			std::cout << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
-			break;
-		}
-
-		case ColorType::SOLID:
-		{
-			// need to print everytime because clearing the terminal also clears color modes
-			const auto [r, g, b] = rgb;
-			std::cout << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
-			break;
-		}
-
-		case ColorType::NONE:
-			break;
-
-		default:
-			throw std::logic_error("?????");
-		}
+		if (color_type != ColorType::WHEEL)
+			throw std::logic_error("termviz::apply_wheel_coloring: color_type != ColorType::WHEEL");
+		const auto [h, s, v] = wheel.hsv;
+		const auto [r, g, b] = ColorUtils::hsvToRgb(ratio_calc(i) + h + wheel.time, s, v);
+		std::cout << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
 	}
 
 	void move_to_column(const int i)

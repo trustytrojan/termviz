@@ -7,20 +7,7 @@ int main(const int argc, const char *const *const argv)
 {
 	try
 	{
-		Args args(argc, argv);
-		termviz(args.audio_file)
-			.set_scale(args.scale)
-			.set_interp_type(args.interp)
-			.set_nth_root(args.nth_root)
-			.set_sample_size(args.fft_size)
-			.set_characters(args.characters)
-			.set_peak_char(args.peak_char)
-			.set_color_type(args.color)
-			.set_wheel_rate(args.wheel_rate)
-			.set_rgb(args.rgb)
-			.set_hsv(args.hsv)
-			.set_multiplier(args.multiplier)
-			.start();
+		Args(argc, argv).to_termviz()->start();
 	}
 	catch (const std::exception &e)
 	{

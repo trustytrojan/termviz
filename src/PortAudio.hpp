@@ -4,16 +4,18 @@
 #include <stdexcept>
 #include <portaudio.h>
 
-class PortAudio
+struct PortAudio
 {
-	struct Error : std::runtime_error
+	class Error : public std::runtime_error
 	{
+		friend class PortAudio;
 		Error(const std::string &s) : std::runtime_error("portaudio: " + s) {}
 	};
 
-public:
 	class Stream
 	{
+		friend class PortAudio;
+
 		PaStream *stream;
 		int sample_size;
 
@@ -26,8 +28,6 @@ public:
 				throw Error(Pa_GetErrorText(err));
 			sample_size = framesPerBuffer;
 		}
-
-		friend class PortAudio;
 
 	public:
 		~Stream()
