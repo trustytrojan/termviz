@@ -37,7 +37,7 @@ public:
 			.help("audio file to visualize and play");
 		add_argument("-n", "--sample-size")
 			.help("number of samples (or frames of samples) to process at a time\n- higher -> increases accuracy\n- lower -> increases responsiveness")
-			.default_value(2048)
+			.default_value(3000)
 			.scan<'i', int>()
 			.validate();
 		add_argument("-c", "--spectrum-chars")

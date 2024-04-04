@@ -1,11 +1,11 @@
 #pragma once
 
-#include <mutex>
-#include <sndfile.hh>
-#include "FrequencySpectrum.hpp"
 #include "ColorUtils.hpp"
+#include "FrequencySpectrum.hpp"
 #include "PortAudio.hpp"
 #include "TerminalSize.hpp"
+#include <mutex>
+#include <sndfile.hh>
 
 class termviz
 {
@@ -25,7 +25,7 @@ private:
 	std::mutex mutex;
 
 	// the most important value
-	int sample_size = 2048;
+	int sample_size = 3000;
 
 	// audio file
 	SndfileHandle sf;
@@ -61,18 +61,17 @@ private:
 	float multiplier = 3;
 
 public:
-	termviz(const std::string &audio_file)
-		: sf(audio_file),
-		  fs(sample_size),
-		  timedata(sample_size),
-		  audio_buffer(sample_size * sf.channels()),
-		  spectrum(stereo_mirrored ? (tsize.width / 2) : tsize.width),
-		  pa_stream(pa.stream(0, sf.channels(), paFloat32, sf.samplerate(), sample_size)) {}
+	termviz(const std::string &audio_file) :
+		sf(audio_file),
+		fs(sample_size),
+		timedata(sample_size),
+		audio_buffer(sample_size *sf.channels()),
+		spectrum(stereo_mirrored ? (tsize.width / 2) : tsize.width),
+		pa_stream(pa.stream(0, sf.channels(), paFloat32, sf.samplerate(), sample_size)) {}
 
 	void start()
 	{
-		while (render_frame())
-			;
+		while (render_frame());
 		std::cout << "\ec";
 	}
 
@@ -202,7 +201,7 @@ private:
 			copy_channel_to_timedata(1);
 			fs.render(timedata.data(), spectrum);
 			print_mirrored_1st_half();
-			
+
 			copy_channel_to_timedata(2);
 			fs.render(timedata.data(), spectrum);
 			print_mirrored_2nd_half();
@@ -221,8 +220,7 @@ private:
 	{
 		for (int i = 0; i < tsize.width; ++i)
 		{
-			apply_coloring(i, [this](const int i)
-						   { return (float)i / tsize.width; });
+			apply_coloring(i, [this](const int i) { return (float)i / tsize.width; });
 			move_to_column(i);
 			print_bar(multiplier * spectrum[tsize.width - i] * tsize.height);
 		}
@@ -234,8 +232,7 @@ private:
 		const auto half_width = tsize.width / 2;
 		for (int i = half_width; i >= 0; --i)
 		{
-			apply_coloring(i, [half_width](const int i)
-						   { return ((float)half_width - i) / half_width; });
+			apply_coloring(i, [half_width](const int i) { return ((float)half_width - i) / half_width; });
 			move_to_column(i);
 			print_bar(multiplier * spectrum[half_width - i] * tsize.height);
 		}
@@ -246,8 +243,7 @@ private:
 		const auto half_width = tsize.width / 2;
 		for (int i = half_width; i < tsize.width; ++i)
 		{
-			apply_coloring(i, [half_width](const int i)
-						   { return (float)i / half_width; });
+			apply_coloring(i, [half_width](const int i) { return (float)i / half_width; });
 			move_to_column(i);
 			print_bar(multiplier * spectrum[i - half_width] * tsize.height);
 		}
@@ -292,15 +288,15 @@ private:
 	{
 		if (!height)
 			return;
-		
+
 		// height = (int)height;
 		int j = 0;
-		
+
 		// until height - 1 to account for peak_char
 		for (; j < height - 1; ++j)
 			// print character, move cursor up 1, move cursor left 1
 			std::cout << characters[j % characters.length()] << "\e[1A\e[1D";
-		
+
 		// print peak_char if set, otherwise next character in characters
 		std::cout << (peak_char ? peak_char : characters[j % characters.length()]);
 	}
