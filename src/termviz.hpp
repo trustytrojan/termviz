@@ -35,6 +35,7 @@ private:
 
 	// terminal width and height
 	TerminalSize tsize;
+	bool stereo_mirrored = true;
 
 	// intermediate arrays
 	std::vector<float> timedata, audio_buffer, spectrum;
@@ -65,7 +66,7 @@ public:
 		  fs(sample_size),
 		  timedata(sample_size),
 		  audio_buffer(sample_size * sf.channels()),
-		  spectrum(tsize.width),
+		  spectrum(stereo_mirrored ? (tsize.width / 2) : tsize.width),
 		  pa_stream(pa.stream(0, sf.channels(), paFloat32, sf.samplerate(), sample_size)) {}
 
 	void start()
@@ -167,7 +168,7 @@ private:
 
 		if (tsize.width != new_tsize.width)
 		{
-			spectrum.resize(new_tsize.width);
+			spectrum.resize(stereo_mirrored ? (new_tsize.width / 2) : new_tsize.width);
 			tsize.width = new_tsize.width;
 		}
 
@@ -195,66 +196,112 @@ private:
 		pa_stream.write(audio_buffer.data(), sample_size);
 		if (frames_read != sample_size)
 			return false;
-		copy_channel_to_timedata(1);
-		fs.render(timedata.data(), spectrum);
 		std::cout << "\ec";
-		print_spectrum();
+		if (stereo_mirrored)
+		{
+			copy_channel_to_timedata(1);
+			fs.render(timedata.data(), spectrum);
+			print_mirrored_1st_half();
+			
+			copy_channel_to_timedata(2);
+			fs.render(timedata.data(), spectrum);
+			print_mirrored_2nd_half();
+		}
+		else
+		{
+			copy_channel_to_timedata(1);
+			fs.render(timedata.data(), spectrum);
+			print_spectrum_full();
+		}
 		mutex.unlock();
 		return true;
 	}
 
-	void print_spectrum()
+	void print_spectrum_full()
 	{
 		for (int i = 0; i < tsize.width; ++i)
 		{
-			// calculate height based on amplitude
-			int bar_height = multiplier * spectrum[i] * tsize.height;
+			apply_coloring(i, [this](const int i)
+						   { return (float)i / tsize.width; });
+			move_to_column(i);
+			print_bar(multiplier * spectrum[tsize.width - i] * tsize.height);
+		}
+		wheel_time += wheel_rate;
+	}
 
-			// apply coloring if necessary
-			switch (color_type)
-			{
-			case ColorType::WHEEL:
-			{
-				const auto [h, s, v] = hsv;
-				const auto [r, g, b] = ColorUtils::hsvToRgb(((float)i / tsize.width) + h + wheel_time, s, v);
-				std::cout << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
-				break;
-			}
+	void print_mirrored_1st_half()
+	{
+		const auto half_width = tsize.width / 2;
+		for (int i = half_width; i >= 0; --i)
+		{
+			apply_coloring(i, [half_width](const int i)
+						   { return ((float)half_width - i) / half_width; });
+			move_to_column(i);
+			print_bar(multiplier * spectrum[half_width - i] * tsize.height);
+		}
+	}
 
-			case ColorType::SOLID:
-			{
-				// need to print everytime because clearing the terminal also clears color modes
-				const auto [r, g, b] = rgb;
-				std::cout << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
-				break;
-			}
+	void print_mirrored_2nd_half()
+	{
+		const auto half_width = tsize.width / 2;
+		for (int i = half_width; i < tsize.width; ++i)
+		{
+			apply_coloring(i, [half_width](const int i)
+						   { return (float)i / half_width; });
+			move_to_column(i);
+			print_bar(multiplier * spectrum[i - half_width] * tsize.height);
+		}
+	}
 
-			case ColorType::NONE:
-				break;
-
-			default:
-				throw std::logic_error("?????");
-			}
-
-			// move cursor to (height, i)
-			// remember that (0, 0) in a terminal is the top-left corner, so positive y moves the cursor down.
-			std::cout << "\e[" << tsize.height << ';' << i << 'f';
-
-			// draw the bar upwards `bar_height` high
-			for (int j = 0; j < bar_height; ++j)
-			{
-				// print character, move cursor up 1, move cursor left 1
-				char character;
-
-				if (peak_char && j == bar_height - 1)
-					character = peak_char;
-				else
-					character = characters[j % characters.length()];
-
-				std::cout << character << "\e[1A\e[1D";
-			}
+	void apply_coloring(const int i, const std::function<float(int)> &ratio_calc)
+	{
+		switch (color_type)
+		{
+		case ColorType::WHEEL:
+		{
+			const auto [h, s, v] = hsv;
+			const auto [r, g, b] = ColorUtils::hsvToRgb(ratio_calc(i) + h + wheel_time, s, v);
+			std::cout << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
+			break;
 		}
 
-		wheel_time += wheel_rate;
+		case ColorType::SOLID:
+		{
+			// need to print everytime because clearing the terminal also clears color modes
+			const auto [r, g, b] = rgb;
+			std::cout << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
+			break;
+		}
+
+		case ColorType::NONE:
+			break;
+
+		default:
+			throw std::logic_error("?????");
+		}
+	}
+
+	void move_to_column(const int i)
+	{
+		// move cursor to (height, i)
+		// remember that (0, 0) in a terminal is the top-left corner, so positive y moves the cursor down.
+		std::cout << "\e[" << tsize.height << ';' << i << 'f';
+	}
+
+	void print_bar(const int height)
+	{
+		if (!height)
+			return;
+		
+		// height = (int)height;
+		int j = 0;
+		
+		// until height - 1 to account for peak_char
+		for (; j < height - 1; ++j)
+			// print character, move cursor up 1, move cursor left 1
+			std::cout << characters[j % characters.length()] << "\e[1A\e[1D";
+		
+		// print peak_char if set, otherwise next character in characters
+		std::cout << (peak_char ? peak_char : characters[j % characters.length()]);
 	}
 };

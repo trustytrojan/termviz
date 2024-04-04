@@ -1,15 +1,10 @@
+#include <signal.h>
 #include <sndfile.hh>
 #include "Args.hpp"
 #include "termviz.hpp"
 
-void exit_handler()
-{
-	std::cout << "\ec";
-}
-
 int main(const int argc, const char *const *const argv)
 {
-	atexit(exit_handler);
 	try
 	{
 		Args args(argc, argv);
