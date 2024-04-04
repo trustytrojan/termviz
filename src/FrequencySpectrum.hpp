@@ -126,8 +126,16 @@ public:
 		{
 			const auto [re, im] = freqdata[i];
 			const float amplitude = sqrt((re * re) + (im * im));
-			// TODO: try a max instead of a sum
-			spectrum[calc_index(i, (int)spectrum.size() - 1)] += amplitude;
+			const auto index = calc_index(i, (int)spectrum.size() - 1);
+
+			// max strategy - best strategy overall, but there is no signature of treble frequencies!
+			// spectrum[index] = std::max(spectrum[index], amplitude);
+
+			// TODO: need to find a stragety to preserve treble signature without losing it
+			
+			// sum strategy - works PERFECTLY, but might be exaggerating treble frequencies
+			// until i find a new strategy, i'm sticking with this because it looks cooler
+			spectrum[index] += amplitude;
 		}
 
 		// downscale all amplitudes by 1 / fft_size
