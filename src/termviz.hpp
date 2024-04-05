@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstring>
 #include <mutex>
 #include <sndfile.hh>
 #include "ColorUtils.hpp"
@@ -37,12 +38,13 @@ private:
 
 	// terminal width and height
 	TerminalSize tsize;
-	bool stereo = (sf.channels() == 2);
+	// bool stereo = (sf.channels() == 2);
+	bool stereo = false;
 	bool mirrored = false;
 
 	// intermediate arrays
 	std::vector<float>
-		timedata = std::vector<float>(sample_size),
+		// timedata = std::vector<float>(sample_size),
 		audio_buffer = std::vector<float>(sample_size * sf.channels()),
 		spectrum = std::vector<float>(stereo ? (tsize.width / 2) : tsize.width);
 
@@ -68,6 +70,10 @@ private:
 	// spectrum - final multiplier
 	float multiplier = 3;
 
+	// sane default for now
+	const int refresh_rate = 60;
+	const int audio_frames_per_video_frame = sf.samplerate() / refresh_rate;
+
 public:
 	termviz(const std::string &audio_file) : sf(audio_file), fs(sample_size) {}
 
@@ -77,8 +83,65 @@ public:
 	 */
 	void start()
 	{
-		while (render_frame())
-			;
+		std::cout << audio_frames_per_video_frame << '\n';
+		// exit(0);
+		for (int pos = 0; pos < sf.frames();)
+		{
+			// handleEvents();
+			check_tsize_update();
+
+			const auto frames_read = sf.readf(audio_buffer.data(), sample_size);
+			if (!frames_read)
+				return;
+			try
+			{
+				pa_stream.write(audio_buffer.data(), audio_frames_per_video_frame);
+			}
+			catch (const PortAudio::Error &e)
+			{
+				// if (!strstr(e.what(), "Output underflowed"))
+					throw;
+				std::cerr << "Output underflowed\n";
+			}
+			if (frames_read != sample_size)
+				return;
+
+			std::cout << "\ec";
+			if (color_type == ColorType::SOLID)
+			{
+				// clearing the terminal also clears color modes
+				const auto [r, g, b] = solid_rgb;
+				std::cout << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
+			}
+
+			// copy_channel_to_input(1);
+			// fs.render(spectrum);
+			// renderer.SetDrawColor().Clear();
+			// render_spectrum_full();
+			// renderer.Present();
+
+			// if (stereo)
+			// 	for (int i = 1; i <= 2; ++i)
+			// 	{
+			// 		copy_channel_to_timedata(i);
+			// 		fs.render(spectrum);
+			// 		print_half(i);
+			// 	}
+			// else
+			{
+				copy_channel_to_timedata(1);
+				fs.render(spectrum);
+				print_spectrum_full();
+				std::cout.flush();
+			}
+
+			pos += audio_frames_per_video_frame;
+			sf.seek(pos, SEEK_SET);
+
+			wheel.time += wheel.rate;
+
+			// return true;
+		}
 		std::cout << "\ec";
 	}
 
@@ -94,7 +157,7 @@ public:
 		mutex.lock();
 		this->sample_size = sample_size;
 		fs.set_fft_size(sample_size);
-		timedata.resize(sample_size);
+		// timedata.resize(sample_size);
 		audio_buffer.resize(sample_size * sf.channels());
 		pa_stream.reopen(0, 2, paFloat32, sf.samplerate(), sample_size);
 		mutex.unlock();
@@ -271,58 +334,59 @@ private:
 			throw std::invalid_argument("channel_num <= 0");
 		if (channel_num > sf.channels())
 			throw std::invalid_argument("channel_num > sf.channels()");
+		const auto input = fs.input_array();
 		for (int i = 0; i < sample_size; ++i)
-			timedata[i] = audio_buffer[i * sf.channels() + channel_num];
+			input[i] = audio_buffer[i * sf.channels() + channel_num];
 	}
 
-	bool render_frame()
-	{
-		mutex.lock();
-		check_tsize_update();
-		const auto frames_read = sf.readf(audio_buffer.data(), sample_size);
-		if (!frames_read)
-			return false;
+	// bool render_frame()
+	// {
+	// 	mutex.lock();
+	// 	check_tsize_update();
+	// 	const auto frames_read = sf.readf(audio_buffer.data(), sample_size);
+	// 	if (!frames_read)
+	// 		return false;
 
-		try
-		{
-			pa_stream.write(audio_buffer.data(), sample_size);
-		}
-		catch (const PortAudio::Error &e)
-		{
-			if (!strstr(e.what(), "Output underflowed"))
-				throw;
-		}
+	// 	try
+	// 	{
+	// 		pa_stream.write(audio_buffer.data(), sample_size);
+	// 	}
+	// 	catch (const PortAudio::Error &e)
+	// 	{
+	// 		if (!strstr(e.what(), "Output underflowed"))
+	// 			throw;
+	// 	}
 
-		if (frames_read != sample_size)
-			return false;
-		std::cout << "\ec";
+	// 	if (frames_read != sample_size)
+	// 		return false;
+	// 	std::cout << "\ec";
 
-		if (color_type == ColorType::SOLID)
-		{
-			// clearing the terminal also clears color modes
-			const auto [r, g, b] = solid_rgb;
-			std::cout << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
-		}
+	// 	if (color_type == ColorType::SOLID)
+	// 	{
+	// 		// clearing the terminal also clears color modes
+	// 		const auto [r, g, b] = solid_rgb;
+	// 		std::cout << "\e[38;2;" << r << ';' << g << ';' << b << 'm';
+	// 	}
 
-		if (stereo)
-			for (int i = 1; i <= 2; ++i)
-			{
-				copy_channel_to_timedata(i);
-				fs.render(timedata.data(), spectrum);
-				print_half(i);
-			}
-		else
-		{
-			copy_channel_to_timedata(1);
-			fs.render(timedata.data(), spectrum);
-			print_spectrum_full();
-		}
+	// 	if (stereo)
+	// 		for (int i = 1; i <= 2; ++i)
+	// 		{
+	// 			copy_channel_to_timedata(i);
+	// 			fs.render(timedata.data(), spectrum);
+	// 			print_half(i);
+	// 		}
+	// 	else
+	// 	{
+	// 		copy_channel_to_timedata(1);
+	// 		fs.render(timedata.data(), spectrum);
+	// 		print_spectrum_full();
+	// 	}
 
-		wheel.time += wheel.rate;
+	// 	wheel.time += wheel.rate;
 
-		mutex.unlock();
-		return true;
-	}
+	// 	mutex.unlock();
+	// 	return true;
+	// }
 
 	void print_spectrum_full()
 	{
